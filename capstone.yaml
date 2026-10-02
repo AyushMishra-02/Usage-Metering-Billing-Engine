@@ -1,0 +1,4 @@
+run: fastapi run app/main.py
+seed: python scripts/seed.py
+test: pytest
+base_url: http://localhost:8000
