@@ -6,7 +6,7 @@ import logging
 from app.database import get_db, engine, Base
 from app.schemas import GenerateRequest, CheckoutRequest
 from app.stripe_service import create_checkout_session, verify_webhook_signature
-from app.billing import check_quota_and_record_usage
+from app.billing import check_quota_and_record_usage, get_cost_rollup
 from app.models import Tenant
 
 logging.basicConfig(level=logging.INFO)
@@ -35,28 +35,48 @@ def generate_ai_response(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
         
-    # 1. First record API call usage (quantity = 1)
+    total_tokens = req.input_tokens + req.cached_tokens + req.output_tokens + req.reasoning_tokens
+    if total_tokens <= 0:
+        raise HTTPException(status_code=400, detail="At least one token category must be > 0")
+
+    # 1. Record API call usage (quantity = 1)
     is_retry_api = check_quota_and_record_usage(
-        db=db, 
-        tenant_id=tenant_id_str, 
-        event_type="api_call", 
-        quantity=1, 
-        idempotency_key=f"{idempotency_key}-api"
+        db=db, tenant_id=tenant_id_str, event_type="api_call",
+        quantity=1, idempotency_key=f"{idempotency_key}-api",
     )
-    
-    # 2. Then record AI token usage
-    is_retry_ai = check_quota_and_record_usage(
-        db=db, 
-        tenant_id=tenant_id_str, 
-        event_type="ai_token", 
-        quantity=req.simulate_tokens, 
-        idempotency_key=f"{idempotency_key}-token"
-    )
-    
+
+    # 2. Record each token category separately (quota checks against total ai_token budget)
+    token_categories = [
+        ("input_tokens",     req.input_tokens),
+        ("cached_tokens",    req.cached_tokens),
+        ("output_tokens",    req.output_tokens),
+        ("reasoning_tokens", req.reasoning_tokens),
+    ]
+    is_retry = is_retry_api
+    for cat, qty in token_categories:
+        if qty > 0:
+            # Quota enforcement is against the combined ai_token limit
+            check_quota_and_record_usage(
+                db=db, tenant_id=tenant_id_str, event_type="ai_token",
+                quantity=qty, idempotency_key=f"{idempotency_key}-{cat}",
+            )
+            # Also record the granular event for cost rollup
+            ret = check_quota_and_record_usage(
+                db=db, tenant_id=tenant_id_str, event_type=cat,
+                quantity=qty, idempotency_key=f"{idempotency_key}-{cat}-detail",
+            )
+            is_retry = is_retry or ret
+
+    from app.billing import calculate_token_cost_cents, COST_API_CALL_CENTS
+    request_cost = calculate_token_cost_cents(
+        req.input_tokens, req.cached_tokens, req.output_tokens, req.reasoning_tokens
+    ) + COST_API_CALL_CENTS
+
     return {
-        "status": "success", 
-        "message": "AI generated successfully" if not is_retry_ai else "Idempotent request successful (already processed)",
-        "tokens_used": req.simulate_tokens
+        "status": "success",
+        "message": "AI generated successfully" if not is_retry else "Idempotent request (already processed)",
+        "tokens_used": total_tokens,
+        "request_cost_cents": round(request_cost, 4),
     }
 
 @app.get("/usage")
@@ -105,6 +125,15 @@ def get_usage(x_tenant_id: str = Header(...), db: Session = Depends(get_db)):
             "limit": plan.ai_token_limit
         }
     }
+
+@app.get("/cost")
+def get_cost(x_tenant_id: str = Header(...), db: Session = Depends(get_db)):
+    """Monthly cost rollup for a tenant."""
+    try:
+        tenant_id_str = str(uuid.UUID(x_tenant_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tenant ID format")
+    return get_cost_rollup(db, tenant_id_str)
 
 @app.post("/checkout")
 def create_checkout(req: CheckoutRequest, db: Session = Depends(get_db)):

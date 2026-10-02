@@ -4,7 +4,10 @@ import uuid
 
 class GenerateRequest(BaseModel):
     prompt: str
-    simulate_tokens: int
+    input_tokens: int = 0
+    cached_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
 
 class UsageResponse(BaseModel):
     message: str

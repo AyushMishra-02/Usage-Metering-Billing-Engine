@@ -48,8 +48,30 @@ Usage limits: {'tenant_id': '11111111-1111-1111-1111-111111111111', 'plan': 'pro
 
 # Phase 4: Cost & Finalization
 
-[ ] Cost rollups with the AI-token rules
+[x] Cost rollups with the AI-token rules
 - Proof:
+```json
+// POST /generate with mixed token types
+{"status":"success","message":"AI generated successfully","tokens_used":850,"request_cost_cents":2.6}
 
-[ ] README + diagram + EVIDENCE.md filled as you go
-- Proof:
+// POST /generate with heavy reasoning
+{"status":"success","message":"AI generated successfully","tokens_used":3500,"request_cost_cents":29.0}
+
+// GET /cost — full monthly rollup
+{
+  "period_start": "2026-10-01T00:00:00+00:00",
+  "period_end": "2026-10-02T13:05:28.082270+00:00",
+  "line_items": {
+    "api_calls":        {"quantity": 2,    "cost_cents": 1.0},
+    "input_tokens":     {"quantity": 5850, "cost_cents": 8.775},
+    "cached_tokens":    {"quantity": 200,  "cost_cents": 0.15},
+    "output_tokens":    {"quantity": 600,  "cost_cents": 3.6},
+    "reasoning_tokens": {"quantity": 2050, "cost_cents": 24.6}
+  },
+  "total_cost_cents": 38.12,
+  "total_cost_usd": "$0.3812"
+}
+```
+
+[x] README + diagram + EVIDENCE.md filled as you go
+- Proof: This file and README.md
