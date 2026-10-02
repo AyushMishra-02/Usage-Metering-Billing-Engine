@@ -40,3 +40,8 @@ class UsageEvent(Base):
     __table_args__ = (
         UniqueConstraint('tenant_id', 'idempotency_key', name='uq_tenant_idempotency'),
     )
+
+class StripeEvent(Base):
+    __tablename__ = "stripe_events"
+    id = Column(String, primary_key=True)  # Stripe event ID (evt_...)
+    processed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

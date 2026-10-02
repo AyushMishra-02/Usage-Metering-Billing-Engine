@@ -11,3 +11,7 @@ class UsageResponse(BaseModel):
     used: int
     limit: int
     cost_cents: int = 0
+
+class CheckoutRequest(BaseModel):
+    tenant_id: str
+    plan_id: str

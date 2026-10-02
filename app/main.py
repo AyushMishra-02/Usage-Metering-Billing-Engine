@@ -4,7 +4,8 @@ import uuid
 import logging
 
 from app.database import get_db, engine, Base
-from app.schemas import GenerateRequest
+from app.schemas import GenerateRequest, CheckoutRequest
+from app.stripe_service import create_checkout_session, verify_webhook_signature
 from app.billing import check_quota_and_record_usage
 from app.models import Tenant
 
@@ -104,3 +105,51 @@ def get_usage(x_tenant_id: str = Header(...), db: Session = Depends(get_db)):
             "limit": plan.ai_token_limit
         }
     }
+
+@app.post("/checkout")
+def create_checkout(req: CheckoutRequest, db: Session = Depends(get_db)):
+    url = create_checkout_session(
+        tenant_id=req.tenant_id,
+        plan_id=req.plan_id,
+        success_url="http://localhost:8000/success",
+        cancel_url="http://localhost:8000/cancel"
+    )
+    return {"url": url}
+
+@app.post("/webhooks/stripe")
+async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+    from app.models import StripeEvent, Subscription
+    
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+    
+    event = verify_webhook_signature(payload, sig_header)
+    
+    # Deduplicate event
+    existing_event = db.query(StripeEvent).filter(StripeEvent.id == event.id).first()
+    if existing_event:
+        return {"status": "ignored", "reason": "duplicate"}
+        
+    # Process event
+    if event.type == 'checkout.session.completed':
+        session = event.data.object
+        
+        tenant_id = None
+        plan_id = None
+        
+        if hasattr(session, 'metadata') and session.metadata:
+            meta_dict = session.metadata.to_dict()
+            tenant_id = meta_dict.get("tenant_id")
+            plan_id = meta_dict.get("plan_id")
+            
+        if tenant_id and plan_id:
+            # Update subscription
+            subscription = db.query(Subscription).filter(Subscription.tenant_id == tenant_id).first()
+            if subscription:
+                subscription.plan_id = plan_id
+                
+    # Record event to prevent duplicate processing
+    db.add(StripeEvent(id=event.id))
+    db.commit()
+        
+    return {"status": "success"}

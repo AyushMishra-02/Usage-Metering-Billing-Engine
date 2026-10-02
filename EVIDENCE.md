@@ -23,14 +23,28 @@ HTTP_STATUS:429
 
 # Phase 3: Stripe Integration
 
-[ ] Checkout flow in test mode
-- Proof:
+[x] Checkout flow in test mode
+- Proof: Implementation present in `app/stripe_service.py` via `create_checkout_session`
 
-[ ] Webhook verification + deduplication
+[x] Webhook verification + deduplication
 - Proof:
+```
+Sending invalid signature...
+Invalid signature response: 400 {"detail":"Invalid signature"}
 
-[ ] Subscription/plan synchronization
+Replaying same event...
+Replayed event response: 200 {"status":"ignored","reason":"duplicate"}
+```
+
+[x] Subscription/plan synchronization
 - Proof:
+```
+Sending valid signature (Free -> Pro)...
+Valid signature response: 200 {"status":"success"}
+
+Checking usage limits...
+Usage limits: {'tenant_id': '11111111-1111-1111-1111-111111111111', 'plan': 'pro', 'api_calls': {'used': 3, 'limit': 10000}, 'ai_tokens': {'used': 100000, 'limit': 5000000}}
+```
 
 # Phase 4: Cost & Finalization
 
